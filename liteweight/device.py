@@ -1,66 +1,51 @@
 from dataclasses import dataclass
 
+
 @dataclass(frozen=True)
 class DeviceSpec:
     name: str
-
-    # Theoretical peaks 
-    mem_bandwidth_gb_s: float      
-    bf16_tflops: float             # DENSE tensor-core TFLOPs, not sparse
+    peak_mem_bandwidth_gbs: float      # theoretical HBM/GDDR7 bandwidth (GB/s)
+    peak_bf16_tflops: float            # dense BF16 tensor-core TFLOPs (no sparsity)
     sm_count: int
-    smem_per_sm_kb: float
-
-    measured_mem_bandwidth_gb_s: float | None = None
+    shared_mem_per_sm_kb: float
+    measured_mem_bandwidth_gbs: float | None = None  # filled from copy-kernel bench
 
     @property
     def peak_bw_bytes_s(self) -> float:
-        return self.mem_bandwidth_gb_s * 1e9
+        return self.peak_mem_bandwidth_gbs * 1e9
 
     @property
     def peak_flops(self) -> float:
-        return self.bf16_tflops * 1e12
+        return self.peak_bf16_tflops * 1e12
 
     @property
     def ridge_point(self) -> float:
-        """FLOPs per byte where memory-bound flips to compute-bound."""
+        """FLOPs/byte where memory-bound flips to compute-bound."""
         return self.peak_flops / self.peak_bw_bytes_s
 
     @property
     def effective_bw_bytes_s(self) -> float:
-        """Use measured BW if available, else theoretical."""
-        bw = self.measured_mem_bandwidth_gb_s or self.mem_bandwidth_gb_s
+        bw = self.measured_mem_bandwidth_gbs or self.peak_mem_bandwidth_gbs
         return bw * 1e9
 
 
+# RTX 5090 (Blackwell sm_120): 1792 GB/s GDDR7, 209.5 TFLOPs BF16 dense
+# ridge_point ≈ 117 FLOPs/byte (the spec's 150-600 range assumes different peak_bf16;
+# the actual dense BF16 figure is ~209 TFLOPs on this card)
+RTX_5090 = DeviceSpec(
+    name="RTX 5090 (Blackwell, sm_120)",
+    peak_mem_bandwidth_gbs=1792.0,
+    peak_bf16_tflops=209.5,
+    sm_count=170,
+    shared_mem_per_sm_kb=128.0,
+)
+
 
 if __name__ == "__main__":
-
-  RTX_5090 = DeviceSpec(
-      name="RTX 5090 (Blackwell, sm_120)",
-      mem_bandwidth_gb_s=1792,   
-      bf16_tflops=209.5,
-      sm_count=170,
-      smem_per_sm_kb=128
-  )
-
-  print(f"""
-    ==================================================
-    Device: {RTX_5090.name}
-    ==================================================
-    Hardware:
-      SM Count              : {RTX_5090.sm_count}
-      Shared Mem per SM     : {RTX_5090.smem_per_sm_kb} KB
-
-    Compute:
-      BF16 TFLOPs (Dense)   : {RTX_5090.bf16_tflops:,.1f}
-      Peak FLOPs            : {RTX_5090.peak_flops:,.0f}
-
-    Memory:
-      Bandwidth (Theoretical): {RTX_5090.mem_bandwidth_gb_s:,.1f} GB/s
-      Peak Bandwidth         : {RTX_5090.peak_bw_bytes_s:,.0f} bytes/s
-      Effective Bandwidth    : {RTX_5090.effective_bw_bytes_s:,.0f} bytes/s
-
-    Performance:
-      Ridge Point            : {RTX_5090.ridge_point:.2f} FLOPs/byte
-    ==================================================
-    """)
+    dev = RTX_5090
+    print(f"Device          : {dev.name}")
+    print(f"SM count        : {dev.sm_count}")
+    print(f"Shared mem/SM   : {dev.shared_mem_per_sm_kb} KB")
+    print(f"BF16 TFLOPs     : {dev.peak_bf16_tflops}")
+    print(f"Memory BW       : {dev.peak_mem_bandwidth_gbs} GB/s")
+    print(f"Ridge point     : {dev.ridge_point:.1f} FLOPs/byte")
